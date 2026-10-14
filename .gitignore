@@ -1,0 +1,17 @@
+# SSH private keys and secrets
+*.pem
+*.key
+.env
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local editor files
+.vscode/
+
+inventory-local.ini
+
+.history/

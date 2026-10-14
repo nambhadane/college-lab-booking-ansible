@@ -1,0 +1,118 @@
+
+---
+- name: Deploy College Lab Resource Booking API
+  hosts: lab_booking_servers
+  become: true
+  gather_facts: true
+
+  vars:
+    app_directory: /opt/lab-booking-api
+    app_user: labapi
+
+  tasks:
+    - name: Update apt package cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install Python and required packages
+      ansible.builtin.apt:
+        name:
+          - python3
+          - python3-venv
+          - python3-pip
+        state: present
+
+    - name: Create dedicated application user
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        system: true
+        shell: /usr/sbin/nologin
+        home: "{{ app_directory }}"
+        create_home: false
+
+    - name: Create application directory
+      ansible.builtin.file:
+        path: "{{ app_directory }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+
+    - name: Deploy Flask application
+      ansible.builtin.copy:
+        src: files/app.py
+        dest: "{{ app_directory }}/app.py"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
+
+    - name: Deploy requirements file
+      ansible.builtin.copy:
+        src: files/requirements.txt
+        dest: "{{ app_directory }}/requirements.txt"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
+
+    - name: Create Python virtual environment
+      ansible.builtin.command:
+        cmd: python3 -m venv "{{ app_directory }}/venv"
+        creates: "{{ app_directory }}/venv/bin/python"
+
+    - name: Install Python dependencies
+      ansible.builtin.pip:
+        requirements: "{{ app_directory }}/requirements.txt"
+        virtualenv: "{{ app_directory }}/venv"
+
+    - name: Create systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/lab-booking-api.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=College Lab Resource Booking API
+          After=network.target
+
+          [Service]
+          User={{ app_user }}
+          Group={{ app_user }}
+          WorkingDirectory={{ app_directory }}
+          ExecStart={{ app_directory }}/venv/bin/python {{ app_directory }}/app.py
+          Restart=on-failure
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart lab booking API
+
+    - name: Enable and start API service
+      ansible.builtin.systemd:
+        name: lab-booking-api
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Verify API health endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:5000/health
+        method: GET
+        status_code: 200
+        return_content: true
+      register: health_result
+      retries: 5
+      delay: 2
+      until: health_result.status == 200
+
+    - name: Display deployment result
+      ansible.builtin.debug:
+        msg: "Deployment successful: {{ health_result.json }}"
+
+  handlers:
+    - name: Restart lab booking API
+      ansible.builtin.systemd:
+        name: lab-booking-api
+        state: restarted
+        daemon_reload: true
